@@ -8,6 +8,22 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# VSCODE
+*.code-workspace
+
+# MEDIA
+*.mp4
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.tiff
+*.tif
+*.pdf
+
+# MISC
+links.txt
+*.lnk
 
 # C extensions
 *.so
