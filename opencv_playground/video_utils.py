@@ -17,9 +17,12 @@ import datetime as dt
 VID_FORMATS = {'H264':'.mp4','MP4V':'.mp4'} # https://learn.microsoft.com/en-us/windows/win32/medfound/video-fourccs
 VID_PROPS = {n[9:]:getattr(cv,n) for n in dir(cv) if n.startswith('CAP_PROP_')}
 VID_BACKENDS = {getattr(cv,n):n[4:] for n in dir(cv) if n.startswith('CAP_') and not n.startswith('CAP_PROP_')}
-SETTINGS_3DOCAM = {'max':[2160,3840,30],
-                   'high':[1440,2560,60],
-                   'med':[],
+SETTINGS_3DOCAM = {'max'  : [2160, 3840, 30],
+                   'high' : [1440, 2560, 60],    # NOTE double check this works
+                   'highL': [1440, 2560, 30],
+                   #'med'  : [1080, 1920, 60],    # NOTE this does not seem to work
+                   #'medL' : [1080, 1920, 25],    # NOTE this does not seem to work
+                   'low'  : [ 720, 1268, 60]     # maybe FPS can be higher, need to test
                    }
 
 # matches 'youtu.be/*', 'youtube.com/*', 'youtube.com/*', & 'youtube.com/watch?v=*' appended with any prefix: 'http://', 'https://', '(https|http)://www.' or no-prefix
@@ -55,12 +58,12 @@ def check_cam_settings(settings:dict|list|tuple,
             ]
     
     # Check settings for dictionary input
-    if type(settings) == dict:
+    if isinstance(settings,dict):
         assert all([k in settings.keys() for k in keys]), f"Not all keys present"
         setting_list = np.roll(sorted([int(settings[k]) for k in keys]),-1).tolist()
     
     # Check settings for other iterable input
-    elif type(settings) in [list,tuple]:
+    elif isinstance(settings,(list,tuple)):
         setting_list = np.roll(sorted(settings),-1).astype(int).tolist() # ensure in correct order, H, W, FPS
 
     else:
@@ -155,7 +158,7 @@ def cam_image_settings(cam_indx:int, # integer index of camera to open
 
     # Create new VideoCapture object
     if cam_obj is None:
-        cam_obj = load_cam_stream(cam_indx, *settings.values())
+        cam_obj = cv.VideoCapture(cam_indx,int(vBackEnd))
     
     # Open VideoCapture object
     elif not cam_obj.isOpened():
@@ -163,7 +166,8 @@ def cam_image_settings(cam_indx:int, # integer index of camera to open
     
     # Apply settings to VideoCapture object
     for k,v in settings.items():
-        cam_obj.set(k,v)
+        if cam_obj.get(k) != v and k != cv.CAP_PROP_BACKEND:
+            cam_obj.set(k,v)
     
     if not cam_obj.isOpened():
         # TODO LOG ERROR
@@ -187,17 +191,19 @@ def load_cam_stream(vDevice:int,
         }
     
     # Verify inputs
-    cam_indx = check_deviceID(vDevice)
+    vDevice = check_deviceID(vDevice)
     assert isinstance(vDevice,(int,float)), f"Must input integer index for camera."
     vBackEnd = check_API_backend(vBackEnd)
     _ = check_cam_settings(settings)
     
     # Create VideoCapture object using device
-    cap = cv.VideoCapture(vDevice)
+    cap = cv.VideoCapture(vDevice, vBackEnd)
     
     # Apply settings
     if cap.isOpened():
-        cap = cam_image_settings(vDevice,*settings.values(),cap)
+        for k,v in settings.items():
+            if cap.get(k) != v and k != cv.CAP_PROP_BACKEND:
+                cap.set(k,v)
     
     elif not cap.isOpened():
         cap = cap.open(vDevice)
@@ -212,7 +218,6 @@ def load_cam_stream(vDevice:int,
         pass
 
     return cap
-    
 
 def get_cam_props(cam_obj:cv.VideoCapture,
                   save_path:str|Path
@@ -225,26 +230,28 @@ def get_cam_props(cam_obj:cv.VideoCapture,
         return
 
     # Setup save path
+    date = dt.datetime.today().date().isoformat()
     in_path = str(save_path).replace('\\','/')
     save_path = Path(in_path) if not Path(in_path).is_dir() else Path(in_path).parent
+    save_file = Path(Path.home().as_posix() + f'/{date}_camera_settings.yaml')
     
     ## Not able to find save path
     if not save_path.exists():
         #TODO add logging entry
-        date = dt.datetime.today().date().isoformat()
-        save_file = Path(Path.home().as_posix() + f'/{date}_camera_settings.yaml')
+        # date = dt.datetime.today().date().isoformat()
+        # save_file = Path(Path.home().as_posix() + f'/{date}_camera_settings.yaml')
         msg = f"Unable to find {in_path}, saving settings to {save_file} instead" # LOG message
     
-    ## Existing save file, check to overwrite
-    if save_file.exists():
-        prompt = f"Found existing file {save_file.as_posix()}, overwrite this file ('Y'/'N')? \n"
-        overwrite = None
-        while overwrite is None:
-            overwrite = input(prompt)
-            overwrite = None if len(overwrite) < 1 or overwrite.upper()[0] not in ['Y','N'] else overwrite.upper()[0]
-        
-        if overwrite == 'N':
-            exit() # exit python, could return None instead, should figure out preference
+        ## Existing save file, check to overwrite
+        if save_file.exists():
+            prompt = f"Found existing file {save_file.as_posix()}, overwrite this file ('Y'/'N')? \n"
+            overwrite = None
+            while overwrite is None:
+                overwrite = input(prompt)
+                overwrite = None if len(overwrite) < 1 or overwrite.upper()[0] not in ['Y','N'] else overwrite.upper()[0]
+            
+            if overwrite == 'N':
+                exit() # exit python, could return None instead, should figure out preference
     
     # Collect information from camera stream
     prop_dict = dict()
@@ -262,6 +269,7 @@ def get_cam_props(cam_obj:cv.VideoCapture,
     # TODO Add camera calibration to `prop_dict` before saving to YAML file
 
     # Output to file
-    with open(save_path,'w') as y:
+    with open(save_file,'w') as y:
         _ = yaml.safe_dump(prop_dict, y)
 
+cap = load_cam_stream(0,1080,1920,30,cv.CAP_DSHOW)
